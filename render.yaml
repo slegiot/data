@@ -1,0 +1,36 @@
+services:
+  # 1. The main Next.js Application
+  - type: web
+    name: silent-data-collector
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ADMIN_UUID
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+
+  # 2. A Render Cron Job instance
+  # Since standard web services in Render don't have built-in crons unless
+  # you create a separate "Cron Job" service type, we define it here:
+  - type: cron
+    name: collector-scraper-cron
+    env: node
+    # Run at the top of every hour
+    schedule: "0 * * * *"
+    # This curl command hits the deployed Next.js service with the correct Bearer token
+    # MAKE SURE to replace 'https://your-app-name.onrender.com' with the actual Web Service URL
+    # once deployed.
+    command: >-
+      curl -X GET "https://your-app-name.onrender.com/api/cron/scrape" 
+      -H "Authorization: Bearer $CRON_SECRET"
+    envVars:
+      - key: CRON_SECRET
+        sync: false
