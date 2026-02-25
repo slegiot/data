@@ -8,55 +8,39 @@ export const dynamic = 'force-dynamic'
 export default async function AdminDashboardPage() {
     const supabase = createAdminClient()
 
-    // 1. Fetch Total Active Collectors
-    const { count: activeCount } = await supabase
-        .from('collectors')
-        .select('*', { count: 'exact', head: true })
-        .eq('is_active', true)
-
-    // 2. Fetch Total Scraped Rows
-    const { count: dataCount } = await supabase
-        .from('scraped_data')
-        .select('*', { count: 'exact', head: true })
-
-    // 3. Fetch Recent Errors (Last 24h)
+    // Run all queries in parallel for speed
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-    const { count: errorCount } = await supabase
-        .from('logs')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'error')
-        .gte('created_at', twentyFourHoursAgo)
 
-    // 4. Fetch volume chart data (scrapes per day for last 7 days)
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-    const { data: recentScrapes } = await supabase
-        .from('scraped_data')
-        .select('created_at')
-        .gte('created_at', sevenDaysAgo)
-        .order('created_at', { ascending: true })
+    // Build per-day count queries for the chart (avoids fetching all rows)
+    const dayQueries = Array.from({ length: 7 }, (_, i) => {
+        const dayStart = new Date()
+        dayStart.setHours(0, 0, 0, 0)
+        dayStart.setDate(dayStart.getDate() - (6 - i))
+        const dayEnd = new Date(dayStart)
+        dayEnd.setDate(dayEnd.getDate() + 1)
 
-    // Aggregate scrapes by day
-    const dailyCounts: Record<string, number> = {}
-
-    // Pre-fill the last 7 days with 0 so the chart looks complete even if empty
-    for (let i = 6; i >= 0; i--) {
-        const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
-        const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-        dailyCounts[dateStr] = 0
-    }
-
-    recentScrapes?.forEach((row) => {
-        const d = new Date(row.created_at)
-        const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-        if (dailyCounts[dateStr] !== undefined) {
-            dailyCounts[dateStr]++
-        }
+        return supabase
+            .from('scraped_data')
+            .select('*', { count: 'exact', head: true })
+            .gte('created_at', dayStart.toISOString())
+            .lt('created_at', dayEnd.toISOString())
+            .then(({ count }) => ({
+                name: dayStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                volume: count ?? 0,
+            }))
     })
 
-    const chartData = Object.keys(dailyCounts).map((date) => ({
-        name: date,
-        volume: dailyCounts[date],
-    }))
+    const [
+        { count: activeCount },
+        { count: dataCount },
+        { count: errorCount },
+        ...chartData
+    ] = await Promise.all([
+        supabase.from('collectors').select('*', { count: 'exact', head: true }).eq('is_active', true),
+        supabase.from('scraped_data').select('*', { count: 'exact', head: true }),
+        supabase.from('logs').select('*', { count: 'exact', head: true }).eq('status', 'error').gte('created_at', twentyFourHoursAgo),
+        ...dayQueries,
+    ])
 
     return (
         <div className="space-y-8">
