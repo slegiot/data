@@ -3,6 +3,7 @@
 -- Run this SQL against your Supabase project to populate all collectors.
 -- =======================================================================
 -- 1. CoinGecko: Top 20 Crypto Prices
+-- Table has 14 columns: star=td[0], rank=td[1], name=td[2], buy=td[3], price=td[4], 1h=td[5], 24h=td[6], 7d=td[7]
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
     'CoinGecko Top Crypto',
@@ -12,14 +13,17 @@ VALUES (
    rows.forEach((row, i) => {
      if (i >= 20) return;
      const cells = row.querySelectorAll("td");
-     if (cells.length < 5) return;
+     if (cells.length < 8) return;
+     const nameText = cells[2]?.innerText?.trim() || "";
+     const nameParts = nameText.split("\n");
      results.push({
-       rank: cells[0]?.innerText?.trim(),
-       name: cells[1]?.innerText?.trim(),
-       price: cells[2]?.innerText?.trim(),
-       change_1h: cells[3]?.innerText?.trim(),
-       change_24h: cells[4]?.innerText?.trim(),
-       change_7d: cells[5]?.innerText?.trim(),
+       rank: cells[1]?.innerText?.trim(),
+       name: nameParts[0] || nameText,
+       symbol: nameParts[1] || "",
+       price: cells[4]?.innerText?.trim(),
+       change_1h: cells[5]?.innerText?.trim(),
+       change_24h: cells[6]?.innerText?.trim(),
+       change_7d: cells[7]?.innerText?.trim(),
        timestamp: new Date().toISOString()
      });
    });
@@ -27,22 +31,30 @@ VALUES (
     true
   );
 -- 2. Yahoo Finance: Major Stock Indices
+-- 4 columns: symbol=td[0], sparkline=td[1], price=td[2], change=td[3]
+-- Limit to first 3 tables (Americas, Europe, Asia) to avoid 133+ rows
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
     'Yahoo Finance Indices',
     'https://finance.yahoo.com/markets/',
-    'const rows = document.querySelectorAll("table tbody tr");
+    'const tables = document.querySelectorAll("table");
    const results = [];
-   rows.forEach((row) => {
-     const cells = row.querySelectorAll("td");
-     if (cells.length < 4) return;
-     results.push({
-       symbol: cells[0]?.innerText?.trim(),
-       name: cells[1]?.innerText?.trim(),
-       price: cells[2]?.innerText?.trim(),
-       change: cells[3]?.innerText?.trim(),
-       change_pct: cells[4]?.innerText?.trim(),
-       timestamp: new Date().toISOString()
+   const seen = new Set();
+   tables.forEach((table, tIdx) => {
+     if (tIdx >= 3) return;
+     const rows = table.querySelectorAll("tbody tr");
+     rows.forEach((row) => {
+       const cells = row.querySelectorAll("td");
+       if (cells.length < 4) return;
+       const symbol = cells[0]?.innerText?.trim();
+       if (!symbol || seen.has(symbol)) return;
+       seen.add(symbol);
+       results.push({
+         symbol: symbol,
+         price: cells[2]?.innerText?.trim(),
+         change: cells[3]?.innerText?.trim(),
+         timestamp: new Date().toISOString()
+       });
      });
    });
    return results;',
@@ -64,11 +76,12 @@ VALUES (
     true
   );
 -- 4. Reuters World/Politics Headlines
+-- data-testid changed from "Heading" to "TitleLink"
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
     'Reuters Politics',
     'https://www.reuters.com/world/',
-    'const links = document.querySelectorAll("a[data-testid=Heading]");
+    'const links = document.querySelectorAll("a[data-testid=TitleLink]");
    const results = [];
    links.forEach((a, i) => {
      if (i >= 15) return;
@@ -199,7 +212,7 @@ VALUES (
     true
   );
 -- 10. X/Twitter: Finance & Crypto Search
--- With stealth evasion active, we target x.com directly.
+-- DISABLED: Anti-bot protection blocks Playwright extraction consistently
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
     'X/Twitter Finance',
@@ -230,5 +243,5 @@ VALUES (
      }
    });
    return results;',
-    true
+    false
   );
