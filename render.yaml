@@ -20,20 +20,6 @@ services:
         # Points to the private browserless service via Render's internal network
         value: ws://browserless-chrome-zqge:10000
 
-  # 2. Render Cron Job — triggers the scrape endpoint every hour
-  - type: cron
-    name: collector-scraper-cron
-    runtime: image
-    image:
-      url: curlimages/curl:latest
-    schedule: "0 * * * *"
-    # REPLACE 'your-app-name' with your actual Render web service name once deployed
-    startCommand: >-
-      curl -X GET "https://silent-data-collector.onrender.com/api/cron/scrape"
-      -H "Authorization: Bearer $CRON_SECRET"
-    envVars:
-      - key: CRON_SECRET
-        sync: false
 
   # 3. Self-hosted Browserless Chrome (private Docker service)
   # Pulls a prebuilt headless Chromium image from Docker Hub.
