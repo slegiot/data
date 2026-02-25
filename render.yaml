@@ -36,12 +36,13 @@ services:
         sync: false
 
   # 3. Self-hosted Browserless Chrome (private Docker service)
-  # Runs headless Chromium accessible via WebSocket on Render's internal network.
+  # Pulls a prebuilt headless Chromium image from Docker Hub.
+  # Accessible via WebSocket on Render's internal network.
   - type: pserv
     name: browserless-chrome
-    env: docker
-    repo: https://github.com/browserless/browserless.git
-    plan: starter
+    runtime: image
+    image:
+      url: docker.io/browserless/chrome:latest
     envVars:
       - key: MAX_CONCURRENT_SESSIONS
         value: "5"
