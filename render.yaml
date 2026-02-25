@@ -17,7 +17,8 @@ services:
       - key: CRON_SECRET
         sync: false
       - key: BROWSERLESS_WSS_URL
-        sync: false
+        # Points to the private browserless service via Render's internal network
+        value: ws://browserless-chrome:3000
 
   # 2. Render Cron Job — triggers the scrape endpoint every hour
   - type: cron
@@ -33,3 +34,20 @@ services:
     envVars:
       - key: CRON_SECRET
         sync: false
+
+  # 3. Self-hosted Browserless Chrome (private Docker service)
+  # Runs headless Chromium accessible via WebSocket on Render's internal network.
+  # No external browser provider needed.
+  - type: pserv
+    name: browserless-chrome
+    runtime: image
+    image:
+      url: browserless/chrome:latest
+    envVars:
+      - key: MAX_CONCURRENT_SESSIONS
+        value: "5"
+      - key: CONNECTION_TIMEOUT
+        value: "60000"
+      - key: TOKEN
+        value: ""
+
