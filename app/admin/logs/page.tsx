@@ -9,9 +9,7 @@ import {
 } from '@/components/ui/table'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Trash } from 'lucide-react'
-import { clearLogs } from './actions'
+import { ClearLogsButton } from './ClearLogsButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,21 +41,7 @@ export default async function LogsViewerPage() {
                     </p>
                 </div>
 
-                <form action={async () => {
-                    'use server'
-                    await clearLogs()
-                }}
-                    onSubmit={(e) => {
-                        if (!window.confirm('Clear all diagnostic logs? This action cannot be undone.')) {
-                            e.preventDefault()
-                        }
-                    }}
-                >
-                    <Button type="submit" variant="destructive" className="bg-red-600/10 text-red-500 hover:bg-red-600/20 border-0">
-                        <Trash className="w-4 h-4 mr-2" />
-                        Clear Diagnostics
-                    </Button>
-                </form>
+                <ClearLogsButton />
             </div>
 
             <Card className="bg-neutral-900 border-neutral-800">
