@@ -61,10 +61,13 @@ export async function runCollector(collector: Collector) {
         await applyStealthToContext(context)
 
         const page = await context.newPage()
+        page.setDefaultTimeout(45000) // Prevent individual operations from hanging
 
-        // 4. Navigate & Wait for SPA to render
+        // 4. Navigate & Wait for content to render
         await page.goto(target_url, { waitUntil: 'domcontentloaded', timeout: 30000 })
-        await page.waitForLoadState('networkidle')
+        // Wait for dynamic content to load — avoid 'networkidle' which hangs on heavy pages
+        // (trackers, websockets, etc. prevent the network from ever going idle)
+        await page.waitForTimeout(5000)
 
         // 5. Simulate human behavior to avoid detection
         await simulateHumanBehavior(page)
