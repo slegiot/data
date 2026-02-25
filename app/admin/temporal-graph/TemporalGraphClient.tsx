@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,8 @@ import {
     Plus,
     Minus,
     Pen,
+    Users,
+    Palette,
 } from 'lucide-react'
 import {
     Area,
@@ -88,6 +90,13 @@ interface TGDiff {
     created_at: string
 }
 
+interface CommunityInfo {
+    id: number
+    memberCount: number
+    topEntities: string[]
+    color: string
+}
+
 interface GraphApiResponse {
     graph: {
         nodes: TGNode[]
@@ -99,11 +108,13 @@ interface GraphApiResponse {
         hubs: Hub[]
         timeline: Snapshot[]
         diffs: TGDiff[]
+        communities: CommunityInfo[]
         stats: {
             totalNodes: number
             totalEdges: number
             anomalyCount: number
             diffCount: { new: number; disappeared: number; changed: number }
+            communityCount: number
             lastUpdated: string | null
         }
     }
@@ -145,6 +156,8 @@ export function TemporalGraphClient({ collectors }: Props) {
     const [loading, setLoading] = useState(true)
     const [autoRefresh, setAutoRefresh] = useState(false)
     const [selectedNode, setSelectedNode] = useState<TGNode | null>(null)
+    const [colorMode, setColorMode] = useState<'type' | 'community'>('type')
+    const [realtimeActive, setRealtimeActive] = useState(false)
 
     const fetchData = useCallback(async () => {
         try {
@@ -174,6 +187,52 @@ export function TemporalGraphClient({ collectors }: Props) {
         return () => clearInterval(interval)
     }, [autoRefresh, fetchData])
 
+    // Supabase Realtime subscription
+    useEffect(() => {
+        if (!realtimeActive) return
+
+        let cleanup: (() => void) | undefined
+
+        async function setupRealtime() {
+            try {
+                const { createClient } = await import('@supabase/supabase-js')
+                const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+                const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+                if (!supabaseUrl || !supabaseKey) return
+
+                const supabase = createClient(supabaseUrl, supabaseKey)
+
+                const channel = supabase
+                    .channel('tg-realtime')
+                    .on('postgres_changes', {
+                        event: 'INSERT',
+                        schema: 'public',
+                        table: 'tg_snapshots',
+                    }, () => {
+                        // A new snapshot means new data was processed — refresh
+                        fetchData()
+                    })
+                    .on('postgres_changes', {
+                        event: 'INSERT',
+                        schema: 'public',
+                        table: 'tg_diffs',
+                    }, () => {
+                        fetchData()
+                    })
+                    .subscribe()
+
+                cleanup = () => {
+                    supabase.removeChannel(channel)
+                }
+            } catch (err) {
+                console.error('[realtime] Failed to setup:', err)
+            }
+        }
+
+        setupRealtime()
+        return () => cleanup?.()
+    }, [realtimeActive, fetchData])
+
     const stats = data?.analytics?.stats
     const anomalies = data?.analytics?.anomalies || []
     const trends = data?.analytics?.trends || []
@@ -181,9 +240,19 @@ export function TemporalGraphClient({ collectors }: Props) {
     const timeline = data?.analytics?.timeline || []
     const diffs = data?.analytics?.diffs || []
     const diffCount = stats?.diffCount || { new: 0, disappeared: 0, changed: 0 }
+    const communities = data?.analytics?.communities || []
     const graphNodes = data?.graph?.nodes || []
     const graphEdges = data?.graph?.edges || []
 
+    // Build community color map for the viz
+    const communityColors = useMemo(() => {
+        const map: Record<number, string> = {}
+        const comms = data?.analytics?.communities || []
+        for (const c of comms) {
+            map[c.id] = c.color
+        }
+        return map
+    }, [data])
     // Timeline chart data
     const timelineChartData = timeline.map((s) => ({
         time: new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -236,6 +305,30 @@ export function TemporalGraphClient({ collectors }: Props) {
                     >
                         <Circle className={`w-2 h-2 ${autoRefresh ? 'fill-green-400 text-green-400 animate-pulse' : 'fill-neutral-600 text-neutral-600'}`} />
                         {autoRefresh ? 'Live' : 'Paused'}
+                    </button>
+
+                    {/* Realtime Toggle */}
+                    <button
+                        onClick={() => setRealtimeActive(!realtimeActive)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${realtimeActive
+                            ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                            : 'bg-neutral-800/50 text-neutral-400 border border-neutral-700 hover:text-white'
+                            }`}
+                    >
+                        <Zap className={`w-3 h-3 ${realtimeActive ? 'text-purple-400' : ''}`} />
+                        {realtimeActive ? 'Realtime' : 'Manual'}
+                    </button>
+
+                    {/* Color Mode Toggle */}
+                    <button
+                        onClick={() => setColorMode(colorMode === 'type' ? 'community' : 'type')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${colorMode === 'community'
+                            ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
+                            : 'bg-neutral-800/50 text-neutral-400 border border-neutral-700 hover:text-white'
+                            }`}
+                    >
+                        <Palette className={`w-3 h-3 ${colorMode === 'community' ? 'text-cyan-400' : ''}`} />
+                        {colorMode === 'community' ? 'Communities' : 'By Type'}
                     </button>
 
                     {/* Manual Refresh */}
@@ -327,6 +420,8 @@ export function TemporalGraphClient({ collectors }: Props) {
                             <TemporalGraphViz
                                 nodes={graphNodes}
                                 edges={graphEdges}
+                                communityColors={communityColors}
+                                colorMode={colorMode}
                                 onNodeClick={(node) => setSelectedNode(node as TGNode)}
                             />
                         )}
@@ -529,6 +624,54 @@ export function TemporalGraphClient({ collectors }: Props) {
                                     <span className="text-[10px] text-neutral-600 shrink-0">
                                         {new Date(diff.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </span>
+                                </div>
+                            ))}
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* ─── Communities ─── */}
+            {communities.length > 0 && (
+                <Card className="bg-neutral-900 border-neutral-800 text-white">
+                    <CardHeader className="flex flex-row items-center justify-between">
+                        <CardTitle className="text-lg font-medium flex items-center gap-2">
+                            <Users className="w-4 h-4 text-cyan-400" />
+                            Detected Communities
+                        </CardTitle>
+                        <Badge className="bg-neutral-800 text-neutral-400 border-0 text-[10px]">
+                            {communities.length} clusters
+                        </Badge>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                            {communities.map((community) => (
+                                <div
+                                    key={community.id}
+                                    className="p-3 rounded-lg bg-neutral-800/30 border border-neutral-800 hover:border-neutral-700 transition-colors"
+                                >
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <div
+                                            className="w-3 h-3 rounded-full shrink-0"
+                                            style={{ backgroundColor: community.color }}
+                                        />
+                                        <span className="text-sm font-medium text-neutral-200">
+                                            Community {community.id}
+                                        </span>
+                                        <Badge className="bg-neutral-700/50 text-neutral-400 border-0 text-[10px] ml-auto">
+                                            {community.memberCount} entities
+                                        </Badge>
+                                    </div>
+                                    <div className="space-y-1">
+                                        {community.topEntities.map((entity, j) => (
+                                            <p
+                                                key={j}
+                                                className="text-xs text-neutral-500 font-mono truncate"
+                                            >
+                                                {entity}
+                                            </p>
+                                        ))}
+                                    </div>
                                 </div>
                             ))}
                         </div>

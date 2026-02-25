@@ -8,6 +8,7 @@ interface GraphNode {
     entity_type: string
     entity_value: string | null
     occurrence_count: number
+    community_id?: number
     // Layout positions computed by force simulation
     x?: number
     y?: number
@@ -24,6 +25,8 @@ interface GraphEdge {
 interface Props {
     nodes: GraphNode[]
     edges: GraphEdge[]
+    communityColors?: Record<number, string>
+    colorMode?: 'type' | 'community'
     onNodeClick?: (node: GraphNode) => void
 }
 
@@ -41,7 +44,7 @@ const TYPE_COLORS: Record<string, string> = {
  * Force-directed graph visualization using SVG.
  * Spring physics simulation with zoom/pan support.
  */
-export function TemporalGraphViz({ nodes, edges, onNodeClick }: Props) {
+export function TemporalGraphViz({ nodes, edges, communityColors, colorMode = 'type', onNodeClick }: Props) {
     const svgRef = useRef<SVGSVGElement>(null)
     const [dimensions, setDimensions] = useState({ width: 800, height: 500 })
     const [hoveredNode, setHoveredNode] = useState<string | null>(null)
@@ -262,7 +265,9 @@ export function TemporalGraphViz({ nodes, edges, onNodeClick }: Props) {
                 {/* Nodes */}
                 {layoutNodes.map((node) => {
                     const r = getNodeRadius(node.occurrence_count)
-                    const color = TYPE_COLORS[node.entity_type] || TYPE_COLORS.unknown
+                    const color = colorMode === 'community' && communityColors && node.community_id != null
+                        ? (communityColors[node.community_id] || TYPE_COLORS.unknown)
+                        : (TYPE_COLORS[node.entity_type] || TYPE_COLORS.unknown)
                     const isHovered = hoveredNode === node.id
 
                     // Check if this node is connected to the hovered node

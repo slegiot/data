@@ -11,6 +11,7 @@ export interface TGNode {
     first_seen_at: string
     last_seen_at: string
     metadata: Record<string, unknown>
+    community_id: number
 }
 
 export interface TGEdge {
@@ -66,17 +67,26 @@ export interface TrendResult {
     sparkline: number[]
 }
 
+export interface CommunityInfo {
+    id: number
+    memberCount: number
+    topEntities: string[]
+    color: string
+}
+
 export interface GraphAnalytics {
     anomalies: AnomalyResult[]
     trends: TrendResult[]
     hubs: (TGNode & { degree: number })[]
     timeline: TGSnapshot[]
     diffs: TGDiff[]
+    communities: CommunityInfo[]
     stats: {
         totalNodes: number
         totalEdges: number
         anomalyCount: number
         diffCount: { new: number; disappeared: number; changed: number }
+        communityCount: number
         lastUpdated: string | null
     }
 }
@@ -659,17 +669,77 @@ export async function getGraphAnalytics(
         else if (d.diff_type === 'changed') diffCount.changed++
     }
 
+    // ── Community Detection ──
+    // Run label propagation via RPC, then build community info from node data
+    const COMMUNITY_COLORS = [
+        '#f97316', '#3b82f6', '#a855f7', '#22c55e', '#eab308',
+        '#ec4899', '#06b6d4', '#f43f5e', '#84cc16', '#8b5cf6',
+        '#14b8a6', '#e879f9', '#fb923c', '#38bdf8', '#a3e635',
+    ]
+
+    let communities: CommunityInfo[] = []
+    try {
+        await supabase.rpc('tg_detect_communities', {
+            p_collector_id: collectorId || null,
+            p_max_iterations: 8,
+        })
+
+        // Re-fetch nodes with updated community_id
+        const { data: updatedNodes } = await supabase
+            .from('tg_nodes')
+            .select('community_id, entity_key, entity_value, occurrence_count')
+            .eq(collectorId ? 'collector_id' : 'id', collectorId || '')
+            .order('occurrence_count', { ascending: false })
+
+        // Build community info
+        if (updatedNodes && updatedNodes.length > 0) {
+            // If we had a collector filter, use that data. Otherwise use all nodes.
+            const communityNodes = collectorId ? updatedNodes : (nodes as (TGNode & { community_id?: number })[])
+
+            const communityMap = new Map<number, { count: number; entities: string[] }>()
+            for (const n of communityNodes) {
+                const cid = (n as { community_id?: number }).community_id ?? 0
+                const existing = communityMap.get(cid)
+                if (existing) {
+                    existing.count++
+                    if (existing.entities.length < 5) {
+                        existing.entities.push(n.entity_value || n.entity_key)
+                    }
+                } else {
+                    communityMap.set(cid, {
+                        count: 1,
+                        entities: [n.entity_value || n.entity_key],
+                    })
+                }
+            }
+
+            communities = Array.from(communityMap.entries())
+                .map(([id, info]) => ({
+                    id,
+                    memberCount: info.count,
+                    topEntities: info.entities,
+                    color: COMMUNITY_COLORS[id % COMMUNITY_COLORS.length],
+                }))
+                .sort((a, b) => b.memberCount - a.memberCount)
+                .slice(0, 15)
+        }
+    } catch {
+        // RPC not available yet — communities will be empty
+    }
+
     return {
         anomalies: anomalies.slice(0, 50),
         trends,
         hubs,
         timeline,
         diffs: diffs.slice(0, 50),
+        communities,
         stats: {
             totalNodes: recentNodes.length,
             totalEdges: edges.filter((e) => new Date(e.last_seen_at) >= getTimeRangeDate(range)).length,
             anomalyCount: anomalies.length,
             diffCount,
+            communityCount: communities.length,
             lastUpdated,
         },
     }
