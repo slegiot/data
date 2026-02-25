@@ -21,9 +21,10 @@ services:
       - key: SENTRY_AUTH_TOKEN
         sync: false
       - key: BROWSERLESS_WSS_URL
-        # Points to the private browserless service via Render's internal network
-        # Render uses the service name as the internal hostname
-        value: ws://browserless-chrome:10000
+        # Set in Render dashboard — private service hostnames include a random suffix
+        # Find it at: Render Dashboard > browserless-chrome > Connect > Internal hostname
+        # Format: ws://<internal-hostname>:10000
+        sync: false
 
   # 2. Cron job that triggers scraping on a schedule
   - type: cron
