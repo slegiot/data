@@ -16,20 +16,19 @@ services:
         sync: false
       - key: CRON_SECRET
         sync: false
+      - key: BROWSERLESS_WSS_URL
+        sync: false
 
-  # 2. A Render Cron Job instance
-  # Since standard web services in Render don't have built-in crons unless
-  # you create a separate "Cron Job" service type, we define it here:
+  # 2. Render Cron Job — triggers the scrape endpoint every hour
   - type: cron
     name: collector-scraper-cron
-    env: node
-    # Run at the top of every hour
+    runtime: image
+    image:
+      url: curlimages/curl:latest
     schedule: "0 * * * *"
-    # This curl command hits the deployed Next.js service with the correct Bearer token
-    # MAKE SURE to replace 'https://your-app-name.onrender.com' with the actual Web Service URL
-    # once deployed.
-    command: >-
-      curl -X GET "https://your-app-name.onrender.com/api/cron/scrape" 
+    # REPLACE 'your-app-name' with your actual Render web service name once deployed
+    startCommand: >-
+      curl -X GET "https://your-app-name.onrender.com/api/cron/scrape"
       -H "Authorization: Bearer $CRON_SECRET"
     envVars:
       - key: CRON_SECRET

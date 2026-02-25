@@ -1,5 +1,11 @@
 import { createAdminClient } from './supabase/admin'
 import { chromium, Browser } from 'playwright-core'
+import {
+    applyStealthToContext,
+    simulateHumanBehavior,
+    getRandomViewport,
+    getRandomUserAgent,
+} from './stealth'
 
 export interface Collector {
     id: string
@@ -25,21 +31,36 @@ export async function runCollector(collector: Collector) {
         // 1. Connect to Remote Browser via CDP
         browser = await chromium.connectOverCDP(process.env.BROWSERLESS_WSS_URL)
 
-        // 2. Open Context and Page
+        // 2. Open Context with stealth configuration
+        const viewport = getRandomViewport()
         const context = await browser.newContext({
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            userAgent: getRandomUserAgent(),
+            viewport,
+            locale: 'en-US',
+            timezoneId: 'America/New_York',
+            // Disguise as real desktop with touch disabled
+            hasTouch: false,
+            isMobile: false,
+            // Set standard screen dimensions
+            screen: { width: viewport.width, height: viewport.height },
         })
+
+        // 3. Inject stealth evasion scripts BEFORE navigating
+        await applyStealthToContext(context)
+
         const page = await context.newPage()
 
-        // 3. Navigate & Wait for SPA to render
-        await page.goto(target_url, { waitUntil: 'domcontentloaded' })
+        // 4. Navigate & Wait for SPA to render
+        await page.goto(target_url, { waitUntil: 'domcontentloaded', timeout: 30000 })
         await page.waitForLoadState('networkidle')
 
-        // 4. Extract Data Dynamically
+        // 5. Simulate human behavior to avoid detection
+        await simulateHumanBehavior(page)
+
+        // 6. Extract Data Dynamically
         // Treating css_selector as a raw JavaScript function body that returns a JSON object
         const extractedPayload = await page.evaluate((scriptBody) => {
             try {
-                // We wrap the script body in a self-executing function to capture its return value
                 const func = new Function(scriptBody)
                 return func()
             } catch (err: unknown) {
@@ -48,7 +69,7 @@ export async function runCollector(collector: Collector) {
             }
         }, css_selector)
 
-        // Validate payload structure simply
+        // Validate payload structure
         let results = extractedPayload
         if (!Array.isArray(extractedPayload) && typeof extractedPayload !== 'object') {
             results = [String(extractedPayload)]
@@ -58,7 +79,7 @@ export async function runCollector(collector: Collector) {
 
         const formattedExtraction = { results: Array.isArray(results) ? results : [results] }
 
-        // 5. Save Payload
+        // 7. Save Payload
         const { error: dataError } = await supabase
             .from('scraped_data')
             .insert([
@@ -70,19 +91,18 @@ export async function runCollector(collector: Collector) {
 
         if (dataError) throw dataError
 
-        // 6. Log Success
+        // 8. Log Success
         await supabase.from('logs').insert([
             {
                 collector_id,
                 status: 'success',
-                message: `Extracted data using Playwright Remote Execution.`,
+                message: `Extracted data via Stealth Playwright. ${formattedExtraction.results.length} items.`,
             },
         ])
 
         return { success: true, count: formattedExtraction.results.length || 1 }
     } catch (error: unknown) {
         const errMsg = error instanceof Error ? error.message : String(error)
-        // Record Error
         console.error(`Collector [${collector_id}] Error:`, error)
 
         await supabase.from('logs').insert([
@@ -95,7 +115,7 @@ export async function runCollector(collector: Collector) {
 
         return { success: false, error: errMsg }
     } finally {
-        // ALWAYS cleanly disconnect from the remote Chromium provider preventing memory leaks
+        // ALWAYS cleanly disconnect from the remote Chromium provider
         if (browser) {
             await browser.close().catch(console.error)
         }

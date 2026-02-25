@@ -5,9 +5,9 @@
 -- 1. CoinGecko: Top 20 Crypto Prices
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
-        'CoinGecko Top Crypto',
-        'https://www.coingecko.com/',
-        'const rows = document.querySelectorAll("table tbody tr");
+    'CoinGecko Top Crypto',
+    'https://www.coingecko.com/',
+    'const rows = document.querySelectorAll("table tbody tr");
    const results = [];
    rows.forEach((row, i) => {
      if (i >= 20) return;
@@ -24,14 +24,14 @@ VALUES (
      });
    });
    return results;',
-        true
-    );
+    true
+  );
 -- 2. Yahoo Finance: Major Stock Indices
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
-        'Yahoo Finance Indices',
-        'https://finance.yahoo.com/markets/',
-        'const rows = document.querySelectorAll("table tbody tr");
+    'Yahoo Finance Indices',
+    'https://finance.yahoo.com/markets/',
+    'const rows = document.querySelectorAll("table tbody tr");
    const results = [];
    rows.forEach((row) => {
      const cells = row.querySelectorAll("td");
@@ -46,14 +46,14 @@ VALUES (
      });
    });
    return results;',
-        true
-    );
+    true
+  );
 -- 3. Crypto Fear & Greed Index
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
-        'Crypto Fear & Greed',
-        'https://alternative.me/crypto/fear-and-greed-index/',
-        'const el = document.querySelector(".fng-circle");
+    'Crypto Fear & Greed',
+    'https://alternative.me/crypto/fear-and-greed-index/',
+    'const el = document.querySelector(".fng-circle");
    const value = el ? el.innerText.trim() : null;
    const label = document.querySelector(".status")?.innerText?.trim();
    return {
@@ -61,14 +61,14 @@ VALUES (
      label: label || "Unknown",
      timestamp: new Date().toISOString()
    };',
-        true
-    );
+    true
+  );
 -- 4. Reuters World/Politics Headlines
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
-        'Reuters Politics',
-        'https://www.reuters.com/world/',
-        'const links = document.querySelectorAll("a[data-testid=Heading]");
+    'Reuters Politics',
+    'https://www.reuters.com/world/',
+    'const links = document.querySelectorAll("a[data-testid=Heading]");
    const results = [];
    links.forEach((a, i) => {
      if (i >= 15) return;
@@ -79,14 +79,14 @@ VALUES (
      });
    });
    return results;',
-        true
-    );
+    true
+  );
 -- 5. AP News Politics Headlines
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
-        'AP News Politics',
-        'https://apnews.com/politics',
-        'const items = document.querySelectorAll("a.Link");
+    'AP News Politics',
+    'https://apnews.com/politics',
+    'const items = document.querySelectorAll("a.Link");
    const results = [];
    const seen = new Set();
    items.forEach((a) => {
@@ -101,14 +101,14 @@ VALUES (
      }
    });
    return results;',
-        true
-    );
+    true
+  );
 -- 6. BBC World News Headlines
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
-        'BBC World News',
-        'https://www.bbc.com/news/world',
-        'const items = document.querySelectorAll("h2[data-testid=card-headline]");
+    'BBC World News',
+    'https://www.bbc.com/news/world',
+    'const items = document.querySelectorAll("h2[data-testid=card-headline]");
    const results = [];
    items.forEach((el, i) => {
      if (i >= 15) return;
@@ -120,14 +120,14 @@ VALUES (
      });
    });
    return results;',
-        true
-    );
+    true
+  );
 -- 7. Reddit: r/wallstreetbets Top Posts
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
-        'r/wallstreetbets',
-        'https://old.reddit.com/r/wallstreetbets/hot/',
-        'const posts = document.querySelectorAll("#siteTable .thing.link");
+    'r/wallstreetbets',
+    'https://old.reddit.com/r/wallstreetbets/hot/',
+    'const posts = document.querySelectorAll("#siteTable .thing.link");
    const results = [];
    posts.forEach((post, i) => {
      if (i >= 20) return;
@@ -146,14 +146,14 @@ VALUES (
      }
    });
    return results;',
-        true
-    );
+    true
+  );
 -- 8. Reddit: r/cryptocurrency Top Posts
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
-        'r/cryptocurrency',
-        'https://old.reddit.com/r/CryptoCurrency/hot/',
-        'const posts = document.querySelectorAll("#siteTable .thing.link");
+    'r/cryptocurrency',
+    'https://old.reddit.com/r/CryptoCurrency/hot/',
+    'const posts = document.querySelectorAll("#siteTable .thing.link");
    const results = [];
    posts.forEach((post, i) => {
      if (i >= 20) return;
@@ -172,14 +172,14 @@ VALUES (
      }
    });
    return results;',
-        true
-    );
+    true
+  );
 -- 9. Reddit: r/politics Top Posts
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
-        'r/politics',
-        'https://old.reddit.com/r/politics/hot/',
-        'const posts = document.querySelectorAll("#siteTable .thing.link");
+    'r/politics',
+    'https://old.reddit.com/r/politics/hot/',
+    'const posts = document.querySelectorAll("#siteTable .thing.link");
    const results = [];
    posts.forEach((post, i) => {
      if (i >= 20) return;
@@ -196,34 +196,39 @@ VALUES (
      }
    });
    return results;',
-        true
-    );
--- 10. X/Twitter: Trending Finance & Crypto Topics
--- Note: X.com has aggressive anti-bot protections. This collector targets the
--- Explore/Trending page. You may need to use a logged-in Browserless session
--- or switch to Nitter (a Twitter frontend mirror) if blocked.
+    true
+  );
+-- 10. X/Twitter: Finance & Crypto Search
+-- With stealth evasion active, we target x.com directly.
 INSERT INTO collectors (name, target_url, css_selector, is_active)
 VALUES (
-        'X/Twitter Trending',
-        'https://nitter.net/search?q=stocks+OR+crypto+OR+bitcoin+OR+market&f=tweets',
-        'const tweets = document.querySelectorAll(".timeline-item");
+    'X/Twitter Finance',
+    'https://x.com/search?q=stocks+OR+crypto+OR+bitcoin+OR+market+crash+OR+fed+rate&f=live',
+    'const articles = document.querySelectorAll("article[data-testid=tweet]");
    const results = [];
-   tweets.forEach((tweet, i) => {
+   articles.forEach((tweet, i) => {
      if (i >= 20) return;
-     const author = tweet.querySelector(".username")?.innerText?.trim();
-     const content = tweet.querySelector(".tweet-content")?.innerText?.trim();
-     const date = tweet.querySelector(".tweet-date a")?.getAttribute("title");
-     const stats = tweet.querySelector(".tweet-stat")?.innerText?.trim();
+     const userEl = tweet.querySelector("div[data-testid=User-Name]");
+     const author = userEl ? userEl.innerText.split("\n")[0] : "unknown";
+     const handle = userEl ? (userEl.innerText.match(/@\w+/) || [""])[0] : "";
+     const content = tweet.querySelector("div[data-testid=tweetText]")?.innerText?.trim();
+     const time = tweet.querySelector("time")?.getAttribute("datetime");
+     const likes = tweet.querySelector("div[data-testid=like] span")?.innerText?.trim();
+     const retweets = tweet.querySelector("div[data-testid=retweet] span")?.innerText?.trim();
+     const replies = tweet.querySelector("div[data-testid=reply] span")?.innerText?.trim();
      if (content) {
        results.push({
-         author: author || "unknown",
+         author,
+         handle,
          content,
-         date: date || new Date().toISOString(),
-         stats: stats || null,
+         posted_at: time || new Date().toISOString(),
+         likes: likes || "0",
+         retweets: retweets || "0",
+         replies: replies || "0",
          timestamp: new Date().toISOString()
        });
      }
    });
    return results;',
-        true
-    );
+    true
+  );
