@@ -33,6 +33,19 @@ export interface TGSnapshot {
     created_at: string
 }
 
+export interface TGDiff {
+    id: string
+    collector_id: string
+    scrape_id: string
+    diff_type: 'new' | 'disappeared' | 'changed' | 'stable'
+    entity_key: string
+    entity_type: string
+    old_value: string | null
+    new_value: string | null
+    occurrence_delta: number
+    created_at: string
+}
+
 export interface GraphData {
     nodes: TGNode[]
     edges: TGEdge[]
@@ -58,10 +71,12 @@ export interface GraphAnalytics {
     trends: TrendResult[]
     hubs: (TGNode & { degree: number })[]
     timeline: TGSnapshot[]
+    diffs: TGDiff[]
     stats: {
         totalNodes: number
         totalEdges: number
         anomalyCount: number
+        diffCount: { new: number; disappeared: number; changed: number }
         lastUpdated: string | null
     }
 }
@@ -148,14 +163,22 @@ function deduplicateEntities(entities: ExtractedEntity[]): ExtractedEntity[] {
 
 // ─── Core Processing ────────────────────────────────────────────
 
+export interface ProcessResult {
+    nodesProcessed: number
+    edgesProcessed: number
+    diffs: { new: number; disappeared: number; changed: number }
+}
+
 /**
  * Process scraped data into the temporal graph.
- * Called after each successful scrape — upserts nodes and creates/strengthens edges.
+ * Uses batch Postgres RPCs for performance (3 DB calls instead of O(n²)).
+ * Computes diffs against previous scrape state for change detection.
  */
 export async function processScrapedData(
     collectorId: string,
-    extractedData: { results: unknown[] }
-): Promise<{ nodesProcessed: number; edgesProcessed: number }> {
+    extractedData: { results: unknown[] },
+    scrapeId?: string
+): Promise<ProcessResult> {
     const supabase = createAdminClient()
 
     // 1. Extract entities from the payload
@@ -163,98 +186,221 @@ export async function processScrapedData(
     const entities = deduplicateEntities(rawEntities)
 
     if (entities.length === 0) {
-        return { nodesProcessed: 0, edgesProcessed: 0 }
+        return { nodesProcessed: 0, edgesProcessed: 0, diffs: { new: 0, disappeared: 0, changed: 0 } }
     }
 
-    // Cap at 200 entities per scrape to avoid explosive graph growth
+    // Cap at 200 entities per scrape
     const cappedEntities = entities.slice(0, 200)
+    const currentEntityKeys = new Set(cappedEntities.map((e) => e.key))
 
-    // 2. Upsert nodes — increment occurrence_count, update last_seen_at
+    // 2. Get previous entity state for this collector (for diff computation)
+    const { data: previousNodes } = await supabase
+        .from('tg_nodes')
+        .select('entity_key, entity_value, occurrence_count')
+        .eq('collector_id', collectorId)
+
+    const previousMap = new Map(
+        (previousNodes || []).map((n) => [n.entity_key, { value: n.entity_value, count: n.occurrence_count }])
+    )
+
+    // 3. Batch upsert nodes via RPC
+    const entityPayload = cappedEntities.map((e) => ({
+        key: e.key,
+        type: e.type,
+        value: e.value,
+    }))
+
     const nodeIds: Map<string, string> = new Map()
+    let nodesProcessed = 0
+
+    // Try batch RPC first, fall back to row-by-row if RPC doesn't exist yet
+    const { data: batchResult, error: rpcError } = await supabase.rpc('tg_batch_upsert_nodes', {
+        p_collector_id: collectorId,
+        p_entities: entityPayload,
+    })
+
+    if (rpcError) {
+        // Fallback: row-by-row if RPC not available
+        console.warn('[temporal-graph] Batch RPC not available, falling back to row-by-row:', rpcError.message)
+        for (const entity of cappedEntities) {
+            const { data: existing } = await supabase
+                .from('tg_nodes')
+                .select('id, occurrence_count')
+                .eq('collector_id', collectorId)
+                .eq('entity_key', entity.key)
+                .single()
+
+            if (existing) {
+                await supabase
+                    .from('tg_nodes')
+                    .update({
+                        occurrence_count: existing.occurrence_count + 1,
+                        last_seen_at: new Date().toISOString(),
+                        entity_value: entity.value,
+                    })
+                    .eq('id', existing.id)
+                nodeIds.set(entity.key, existing.id)
+            } else {
+                const { data: newNode } = await supabase
+                    .from('tg_nodes')
+                    .insert({
+                        collector_id: collectorId,
+                        entity_key: entity.key,
+                        entity_type: entity.type,
+                        entity_value: entity.value,
+                    })
+                    .select('id')
+                    .single()
+                if (newNode) nodeIds.set(entity.key, newNode.id)
+            }
+        }
+        nodesProcessed = nodeIds.size
+    } else {
+        // Batch RPC succeeded — extract node IDs from response
+        const results = batchResult as { entity_key: string; node_id: string }[]
+        for (const row of results) {
+            nodeIds.set(row.entity_key, row.node_id)
+        }
+        nodesProcessed = results.length
+    }
+
+    // 4. Batch upsert edges
+    //    Build edge pairs between co-occurring entities (capped)
+    const nodeEntries = Array.from(nodeIds.entries())
+    const maxEdgePairs = 500
+    const edgePairs: { source_id: string; target_id: string }[] = []
+
+    for (let i = 0; i < nodeEntries.length && edgePairs.length < maxEdgePairs; i++) {
+        for (let j = i + 1; j < nodeEntries.length && edgePairs.length < maxEdgePairs; j++) {
+            edgePairs.push({
+                source_id: nodeEntries[i][1],
+                target_id: nodeEntries[j][1],
+            })
+        }
+    }
+
+    let edgesProcessed = 0
+    if (edgePairs.length > 0) {
+        const { data: edgeResult, error: edgeError } = await supabase.rpc('tg_batch_upsert_edges', {
+            p_collector_id: collectorId,
+            p_edges: edgePairs,
+        })
+
+        if (edgeError) {
+            // Fallback: row-by-row
+            console.warn('[temporal-graph] Edge batch RPC not available, falling back:', edgeError.message)
+            for (const pair of edgePairs) {
+                const [sId, tId] = pair.source_id < pair.target_id
+                    ? [pair.source_id, pair.target_id]
+                    : [pair.target_id, pair.source_id]
+
+                const { data: existing } = await supabase
+                    .from('tg_edges')
+                    .select('id, weight')
+                    .eq('collector_id', collectorId)
+                    .eq('source_node_id', sId)
+                    .eq('target_node_id', tId)
+                    .single()
+
+                if (existing) {
+                    await supabase.from('tg_edges')
+                        .update({ weight: existing.weight + 1, last_seen_at: new Date().toISOString() })
+                        .eq('id', existing.id)
+                } else {
+                    await supabase.from('tg_edges').insert({
+                        collector_id: collectorId,
+                        source_node_id: sId,
+                        target_node_id: tId,
+                    })
+                }
+                edgesProcessed++
+            }
+        } else {
+            edgesProcessed = (edgeResult as number) || edgePairs.length
+        }
+    }
+
+    // 5. Compute diffs against previous state
+    const diffRecords: {
+        diff_type: string
+        entity_key: string
+        entity_type: string
+        old_value: string | null
+        new_value: string | null
+        occurrence_delta: number
+    }[] = []
+
+    const diffCounts = { new: 0, disappeared: 0, changed: 0 }
 
     for (const entity of cappedEntities) {
-        // Try to find existing node
-        const { data: existing } = await supabase
-            .from('tg_nodes')
-            .select('id, occurrence_count')
-            .eq('collector_id', collectorId)
-            .eq('entity_key', entity.key)
-            .single()
+        const prev = previousMap.get(entity.key)
+        if (!prev) {
+            // New entity — didn't exist before
+            diffRecords.push({
+                diff_type: 'new',
+                entity_key: entity.key,
+                entity_type: entity.type,
+                old_value: null,
+                new_value: entity.value,
+                occurrence_delta: 1,
+            })
+            diffCounts.new++
+        } else if (prev.value !== entity.value) {
+            // Value changed
+            diffRecords.push({
+                diff_type: 'changed',
+                entity_key: entity.key,
+                entity_type: entity.type,
+                old_value: prev.value,
+                new_value: entity.value,
+                occurrence_delta: 1,
+            })
+            diffCounts.changed++
+        }
+    }
 
-        if (existing) {
-            // Update existing node
-            await supabase
-                .from('tg_nodes')
-                .update({
-                    occurrence_count: existing.occurrence_count + 1,
-                    last_seen_at: new Date().toISOString(),
-                    entity_value: entity.value,
-                })
-                .eq('id', existing.id)
+    // Disappeared entities: were in previous scrape but not in current
+    for (const [key, prev] of Array.from(previousMap.entries())) {
+        if (!currentEntityKeys.has(key)) {
+            diffRecords.push({
+                diff_type: 'disappeared',
+                entity_key: key,
+                entity_type: 'unknown',
+                old_value: prev.value,
+                new_value: null,
+                occurrence_delta: 0,
+            })
+            diffCounts.disappeared++
+        }
+    }
 
-            nodeIds.set(entity.key, existing.id)
-        } else {
-            // Insert new node
-            const { data: newNode } = await supabase
-                .from('tg_nodes')
-                .insert({
+    // 6. Batch insert diffs
+    if (diffRecords.length > 0 && scrapeId) {
+        const { error: diffError } = await supabase.rpc('tg_batch_insert_diffs', {
+            p_collector_id: collectorId,
+            p_scrape_id: scrapeId,
+            p_diffs: diffRecords.slice(0, 500), // Cap at 500 diffs
+        })
+
+        if (diffError) {
+            // Fallback: direct insert
+            console.warn('[temporal-graph] Diff batch RPC not available, falling back:', diffError.message)
+            if (scrapeId) {
+                const rows = diffRecords.slice(0, 100).map((d) => ({
                     collector_id: collectorId,
-                    entity_key: entity.key,
-                    entity_type: entity.type,
-                    entity_value: entity.value,
-                })
-                .select('id')
-                .single()
-
-            if (newNode) {
-                nodeIds.set(entity.key, newNode.id)
+                    scrape_id: scrapeId,
+                    ...d,
+                }))
+                try {
+                    await supabase.from('tg_diffs').insert(rows)
+                } catch {
+                    // tg_diffs table may not exist yet — silently ignore
+                }
             }
         }
     }
 
-    // 3. Create/strengthen edges between co-occurring entities
-    //    We connect entities that appeared in the same scrape
-    //    Limit edge creation to avoid O(n²) explosion
-    const nodeEntries = Array.from(nodeIds.entries())
-    let edgesProcessed = 0
-    const maxEdgePairs = 500
-
-    for (let i = 0; i < nodeEntries.length && edgesProcessed < maxEdgePairs; i++) {
-        for (let j = i + 1; j < nodeEntries.length && edgesProcessed < maxEdgePairs; j++) {
-            const [, sourceId] = nodeEntries[i]
-            const [, targetId] = nodeEntries[j]
-
-            // Ensure consistent ordering (smaller UUID first) to avoid duplicates
-            const [sId, tId] = sourceId < targetId ? [sourceId, targetId] : [targetId, sourceId]
-
-            const { data: existingEdge } = await supabase
-                .from('tg_edges')
-                .select('id, weight')
-                .eq('collector_id', collectorId)
-                .eq('source_node_id', sId)
-                .eq('target_node_id', tId)
-                .single()
-
-            if (existingEdge) {
-                await supabase
-                    .from('tg_edges')
-                    .update({
-                        weight: existingEdge.weight + 1,
-                        last_seen_at: new Date().toISOString(),
-                    })
-                    .eq('id', existingEdge.id)
-            } else {
-                await supabase.from('tg_edges').insert({
-                    collector_id: collectorId,
-                    source_node_id: sId,
-                    target_node_id: tId,
-                })
-            }
-            edgesProcessed++
-        }
-    }
-
-    // 4. Create a snapshot for timeline tracking
+    // 7. Create a snapshot for timeline tracking
     const { count: nodeCount } = await supabase
         .from('tg_nodes')
         .select('*', { count: 'exact', head: true })
@@ -278,11 +424,11 @@ export async function processScrapedData(
         collector_id: collectorId,
         node_count: nodeCount ?? 0,
         edge_count: edgeCount ?? 0,
-        anomaly_count: 0, // Updated async by analytics
+        anomaly_count: diffCounts.new + diffCounts.changed,
         avg_occurrence: Math.round(avgOccurrence * 100) / 100,
     })
 
-    return { nodesProcessed: nodeIds.size, edgesProcessed }
+    return { nodesProcessed, edgesProcessed, diffs: diffCounts }
 }
 
 // ─── Graph Data Retrieval ───────────────────────────────────────
@@ -490,15 +636,40 @@ export async function getGraphAnalytics(
         ? nodes.reduce((latest, n) => n.last_seen_at > latest ? n.last_seen_at : latest, nodes[0].last_seen_at)
         : null
 
+    // ── Fetch diffs ──
+    let diffsQuery = supabase
+        .from('tg_diffs')
+        .select('*')
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(100)
+
+    if (collectorId) {
+        diffsQuery = diffsQuery.eq('collector_id', collectorId)
+    }
+
+    const { data: diffsData } = await diffsQuery
+    const diffs = (diffsData || []) as TGDiff[]
+
+    // Count diffs by type
+    const diffCount = { new: 0, disappeared: 0, changed: 0 }
+    for (const d of diffs) {
+        if (d.diff_type === 'new') diffCount.new++
+        else if (d.diff_type === 'disappeared') diffCount.disappeared++
+        else if (d.diff_type === 'changed') diffCount.changed++
+    }
+
     return {
         anomalies: anomalies.slice(0, 50),
         trends,
         hubs,
         timeline,
+        diffs: diffs.slice(0, 50),
         stats: {
             totalNodes: recentNodes.length,
             totalEdges: edges.filter((e) => new Date(e.last_seen_at) >= getTimeRangeDate(range)).length,
             anomalyCount: anomalies.length,
+            diffCount,
             lastUpdated,
         },
     }

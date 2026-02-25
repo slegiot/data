@@ -98,7 +98,7 @@ export async function runCollector(collector: Collector) {
         const formattedExtraction = { results: Array.isArray(results) ? results : [results] }
 
         // 7. Save Payload
-        const { error: dataError } = await supabase
+        const { data: insertedData, error: dataError } = await supabase
             .from('scraped_data')
             .insert([
                 {
@@ -106,8 +106,12 @@ export async function runCollector(collector: Collector) {
                     extracted_data: formattedExtraction,
                 },
             ])
+            .select('id')
+            .single()
 
         if (dataError) throw dataError
+
+        const scrapeId = insertedData?.id
 
         // 8. Log Success
         await supabase.from('logs').insert([
@@ -119,7 +123,7 @@ export async function runCollector(collector: Collector) {
         ])
 
         // 9. Process into Temporal Graph (fire-and-forget — never block the pipeline)
-        processScrapedData(collector_id, formattedExtraction).catch((tgError) => {
+        processScrapedData(collector_id, formattedExtraction, scrapeId).catch((tgError) => {
             console.error(`[scraper] Temporal graph processing failed for [${collector_id}]:`, tgError)
         })
 
