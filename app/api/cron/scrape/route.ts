@@ -4,90 +4,83 @@ import { runCollector } from '@/lib/scraper'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(request: Request) {
-    try {
-        // 1. Verify Authorization Header
-        const authHeader = request.headers.get('authorization')
-        const cronSecret = process.env.CRON_SECRET
+// Maximum time Next.js will allow this route to run (5 minutes)
+export const maxDuration = 300
 
-        if (!cronSecret) {
-            console.error('CRON_SECRET environment variable is missing')
-            return NextResponse.json(
-                { error: 'Server misconfiguration' },
-                { status: 500 }
-            )
-        }
+/**
+ * Background processor: runs all active collectors and logs results.
+ * Executes asynchronously after the 202 response is sent.
+ */
+async function processCollectors() {
+    const supabase = createAdminClient()
 
-        if (authHeader !== `Bearer ${cronSecret}`) {
-            return NextResponse.json(
-                { error: 'Unauthorized' },
-                { status: 401 }
-            )
-        }
+    const { data: collectors, error } = await supabase
+        .from('collectors')
+        .select('*')
+        .eq('is_active', true)
 
-        // 2. Fetch active collectors
-        const supabase = createAdminClient()
-        const { data: collectors, error } = await supabase
-            .from('collectors')
-            .select('*')
-            .eq('is_active', true)
+    if (error) {
+        console.error('[cron] Failed to fetch collectors:', error)
+        return
+    }
 
-        if (error) {
-            console.error('Failed to fetch active collectors:', error)
-            return NextResponse.json(
-                { error: 'Database query failed' },
-                { status: 500 }
-            )
-        }
+    if (!collectors || collectors.length === 0) {
+        console.log('[cron] No active collectors found')
+        return
+    }
 
-        if (!collectors || collectors.length === 0) {
-            return NextResponse.json({
-                message: 'No active collectors found',
-                summary: { total: 0, successful: 0, failed: 0 }
-            })
-        }
+    console.log(`[cron] Starting ${collectors.length} collectors...`)
 
-        // 3. Execute all active collectors concurrently
-        const results = await Promise.allSettled(
-            collectors.map(collector => runCollector(collector))
-        )
-
-        // 4. Summarize Results
-        let successful = 0
-        let failed = 0
-        const details: Record<string, unknown>[] = []
-
-        results.forEach((promiseResult, index) => {
-            const collectorId = collectors[index].id
-            if (promiseResult.status === 'fulfilled') {
-                const scrapeResult = promiseResult.value
-                if (scrapeResult.success) {
-                    successful++
-                    details.push({ collector: collectorId, status: 'success', count: scrapeResult.count })
-                } else {
-                    failed++
-                    details.push({ collector: collectorId, status: 'error', error: scrapeResult.error })
-                }
+    // Run collectors sequentially to avoid overwhelming browserless
+    for (const collector of collectors) {
+        try {
+            console.log(`[cron] Running: ${collector.name}`)
+            const result = await runCollector(collector)
+            if (result.success) {
+                console.log(`[cron] ✓ ${collector.name} — ${result.count} items`)
             } else {
-                failed++
-                details.push({ collector: collectorId, status: 'exception', error: String(promiseResult.reason) })
+                console.error(`[cron] ✗ ${collector.name} — ${result.error}`)
             }
-        })
+        } catch (err) {
+            console.error(`[cron] ✗ ${collector.name} — exception:`, err)
+        }
+    }
 
-        return NextResponse.json({
-            message: 'Cron job execution completed',
-            summary: {
-                total: collectors.length,
-                successful,
-                failed,
-            },
-            details,
-        })
-    } catch (error) {
-        console.error('Unexpected error in Cron Route:', error)
+    console.log('[cron] All collectors finished')
+}
+
+export async function GET(request: Request) {
+    // 1. Verify Authorization Header
+    const authHeader = request.headers.get('authorization')
+    const cronSecret = process.env.CRON_SECRET
+
+    if (!cronSecret) {
+        console.error('CRON_SECRET environment variable is missing')
         return NextResponse.json(
-            { error: 'Internal server error' },
+            { error: 'Server misconfiguration' },
             { status: 500 }
         )
     }
+
+    if (authHeader !== `Bearer ${cronSecret}`) {
+        return NextResponse.json(
+            { error: 'Unauthorized' },
+            { status: 401 }
+        )
+    }
+
+    // 2. Fire-and-forget: start processing in the background
+    processCollectors().catch((err) =>
+        console.error('[cron] Background processing error:', err)
+    )
+
+    // 3. Respond immediately so the cron job doesn't timeout
+    return NextResponse.json(
+        {
+            message: 'Scrape job accepted — processing in background',
+            accepted_at: new Date().toISOString(),
+        },
+        { status: 202 }
+    )
 }
+
