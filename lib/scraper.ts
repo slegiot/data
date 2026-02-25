@@ -22,6 +22,8 @@ export async function runCollector(collector: Collector) {
     const { id: collector_id, target_url, css_selector } = collector
 
     let browser: Browser | null = null
+    let context: import('playwright-core').BrowserContext | null = null
+    let page: import('playwright-core').Page | null = null
 
     try {
         if (!process.env.BROWSERLESS_WSS_URL) {
@@ -45,7 +47,7 @@ export async function runCollector(collector: Collector) {
 
         // 2. Open Context with stealth configuration
         const viewport = getRandomViewport()
-        const context = await browser.newContext({
+        context = await browser.newContext({
             userAgent: getRandomUserAgent(),
             viewport,
             locale: 'en-US',
@@ -60,7 +62,7 @@ export async function runCollector(collector: Collector) {
         // 3. Inject stealth evasion scripts BEFORE navigating
         await applyStealthToContext(context)
 
-        const page = await context.newPage()
+        page = await context.newPage()
         page.setDefaultTimeout(45000) // Prevent individual operations from hanging
 
         // 4. Navigate & Wait for content to render
@@ -136,9 +138,16 @@ export async function runCollector(collector: Collector) {
 
         return { success: false, error: errMsg }
     } finally {
-        // ALWAYS cleanly disconnect from the remote Chromium provider
+        // ALWAYS clean up resources in order: page → context → browser
+        if (page) {
+            await page.close().catch(console.error)
+        }
+        if (context) {
+            await context.close().catch(console.error)
+        }
         if (browser) {
             await browser.close().catch(console.error)
         }
     }
 }
+

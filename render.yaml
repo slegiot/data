@@ -50,6 +50,6 @@ services:
       - key: MAX_CONCURRENT_SESSIONS
         value: "5"
       - key: CONNECTION_TIMEOUT
-        value: "60000"
+        value: "120000"
       - key: TOKEN
         value: ""
