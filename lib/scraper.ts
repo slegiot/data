@@ -29,8 +29,20 @@ export async function runCollector(collector: Collector) {
             throw new Error('BROWSERLESS_WSS_URL is not defined in the environment')
         }
 
-        // 1. Connect to Remote Browser via CDP
-        browser = await chromium.connectOverCDP(process.env.BROWSERLESS_WSS_URL)
+        const wsUrl = process.env.BROWSERLESS_WSS_URL
+        console.log(`[scraper] Connecting to browserless at: ${wsUrl}`)
+
+        // 1. Connect to Remote Browser via browserless WebSocket
+        // Try connectOverCDP first (standard Chrome DevTools Protocol)
+        try {
+            browser = await chromium.connectOverCDP(wsUrl, { timeout: 30000 })
+            console.log(`[scraper] Connected via CDP to ${wsUrl}`)
+        } catch (cdpError) {
+            console.warn(`[scraper] CDP connection failed, trying Playwright connect:`, cdpError)
+            // Fallback: try chromium.connect for Playwright-native protocol
+            browser = await chromium.connect(wsUrl, { timeout: 30000 })
+            console.log(`[scraper] Connected via Playwright protocol to ${wsUrl}`)
+        }
 
         // 2. Open Context with stealth configuration
         const viewport = getRandomViewport()
