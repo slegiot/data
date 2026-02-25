@@ -42,12 +42,15 @@ export default function AdminLayout({
 
                 <nav className="flex-1 space-y-1">
                     {navItems.map((item) => {
-                        const isActive = pathname === item.href
+                        const isActive = item.href === '/admin'
+                            ? pathname === '/admin'
+                            : pathname.startsWith(item.href)
                         const Icon = item.icon
                         return (
                             <Link
                                 key={item.name}
                                 href={item.href}
+                                prefetch={true}
                                 className={`flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-colors ${isActive
                                     ? 'bg-orange-500/10 text-orange-400'
                                     : 'text-neutral-400 hover:text-white hover:bg-neutral-800/50'
