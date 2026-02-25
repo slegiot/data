@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
-import { LayoutDashboard, List, Database, ScrollText, LogOut } from 'lucide-react'
+import { LayoutDashboard, List, Database, ScrollText, LogOut, GitBranch } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/toaster'
@@ -26,6 +26,7 @@ export default function AdminLayout({
         { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
         { name: 'Collectors', href: '/admin/collectors', icon: List },
         { name: 'Data', href: '/admin/data', icon: Database },
+        { name: 'Temporal Graph', href: '/admin/temporal-graph', icon: GitBranch },
         { name: 'Logs', href: '/admin/logs', icon: ScrollText },
     ]
 

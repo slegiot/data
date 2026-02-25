@@ -7,6 +7,7 @@ import {
     getRandomViewport,
     getRandomUserAgent,
 } from './stealth'
+import { processScrapedData } from './temporal-graph'
 
 export interface Collector {
     id: string
@@ -116,6 +117,11 @@ export async function runCollector(collector: Collector) {
                 message: `Extracted data via Stealth Playwright. ${formattedExtraction.results.length} items.`,
             },
         ])
+
+        // 9. Process into Temporal Graph (fire-and-forget — never block the pipeline)
+        processScrapedData(collector_id, formattedExtraction).catch((tgError) => {
+            console.error(`[scraper] Temporal graph processing failed for [${collector_id}]:`, tgError)
+        })
 
         return { success: true, count: formattedExtraction.results.length || 1 }
     } catch (error: unknown) {
