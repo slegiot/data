@@ -16,10 +16,25 @@ services:
         sync: false
       - key: CRON_SECRET
         sync: false
+      - key: NEXT_PUBLIC_SENTRY_DSN
+        sync: false
+      - key: SENTRY_AUTH_TOKEN
+        sync: false
       - key: BROWSERLESS_WSS_URL
         # Points to the private browserless service via Render's internal network
-        value: ws://browserless-chrome-zqge:10000
+        # Render uses the service name as the internal hostname
+        value: ws://browserless-chrome:10000
 
+  # 2. Cron job that triggers scraping on a schedule
+  - type: cron
+    name: collector-scraper-cron
+    env: node
+    buildCommand: npm install
+    startCommand: node -e "fetch('https://silent-data-collector.onrender.com/api/cron/scrape',{headers:{'Authorization':'Bearer ' + process.env.CRON_SECRET}}).then(r=>r.json()).then(console.log).catch(console.error)"
+    schedule: "0 * * * *"
+    envVars:
+      - key: CRON_SECRET
+        sync: false
 
   # 3. Self-hosted Browserless Chrome (private Docker service)
   # Pulls a prebuilt headless Chromium image from Docker Hub.
@@ -36,4 +51,3 @@ services:
         value: "60000"
       - key: TOKEN
         value: ""
-

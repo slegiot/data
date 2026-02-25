@@ -1,52 +1,21 @@
 -- ================================================================
--- Silent Data Collector — Database Schema
+-- Migration: Fix RLS policies + add updated_at column
+-- Run this in the Supabase SQL Editor (Dashboard > SQL Editor)
 -- ================================================================
--- IMPORTANT: Replace 'e30bbcd6-3f78-47d1-b335-addfeed3863a' with your actual Supabase
--- auth user UUID before running this migration. You can find your UUID
--- at: Supabase Dashboard > Authentication > Users > click your user > User UID
---
--- Example:
---   (auth.uid() = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'::uuid)
--- ================================================================
--- Create tables
-CREATE TABLE collectors (
-    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    name text NOT NULL,
-    target_url text NOT NULL,
-    css_selector text NOT NULL,
-    is_active boolean DEFAULT true,
-    created_at timestamptz DEFAULT now(),
-    updated_at timestamptz DEFAULT now()
-);
-CREATE TABLE scraped_data (
-    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    collector_id uuid REFERENCES collectors(id) ON DELETE CASCADE,
-    extracted_data jsonb,
-    created_at timestamptz DEFAULT now()
-);
-CREATE TABLE logs (
-    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    collector_id uuid REFERENCES collectors(id) ON DELETE CASCADE,
-    status text CHECK (status IN ('success', 'error')),
-    message text,
-    created_at timestamptz DEFAULT now()
-);
--- Auto-update the updated_at column on collectors
-CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $$ BEGIN NEW.updated_at = now();
-RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-CREATE TRIGGER set_collectors_updated_at BEFORE
-UPDATE ON collectors FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
--- ================================================================
--- Row Level Security
--- ================================================================
--- IMPORTANT: Replace every instance of 'e30bbcd6-3f78-47d1-b335-addfeed3863a' below
--- with your actual admin user UUID.
-ALTER TABLE collectors ENABLE ROW LEVEL SECURITY;
-ALTER TABLE scraped_data ENABLE ROW LEVEL SECURITY;
-ALTER TABLE logs ENABLE ROW LEVEL SECURITY;
--- Policies for collectors
+-- 1. Drop all existing RLS policies (they have the placeholder UUID)
+DROP POLICY IF EXISTS "Allow admin to select collectors" ON collectors;
+DROP POLICY IF EXISTS "Allow admin to insert collectors" ON collectors;
+DROP POLICY IF EXISTS "Allow admin to update collectors" ON collectors;
+DROP POLICY IF EXISTS "Allow admin to delete collectors" ON collectors;
+DROP POLICY IF EXISTS "Allow admin to select scraped_data" ON scraped_data;
+DROP POLICY IF EXISTS "Allow admin to insert scraped_data" ON scraped_data;
+DROP POLICY IF EXISTS "Allow admin to update scraped_data" ON scraped_data;
+DROP POLICY IF EXISTS "Allow admin to delete scraped_data" ON scraped_data;
+DROP POLICY IF EXISTS "Allow admin to select logs" ON logs;
+DROP POLICY IF EXISTS "Allow admin to insert logs" ON logs;
+DROP POLICY IF EXISTS "Allow admin to update logs" ON logs;
+DROP POLICY IF EXISTS "Allow admin to delete logs" ON logs;
+-- 2. Recreate policies with your actual UUID
 CREATE POLICY "Allow admin to select collectors" ON collectors FOR
 SELECT USING (
         (
@@ -70,7 +39,6 @@ CREATE POLICY "Allow admin to delete collectors" ON collectors FOR DELETE USING 
         auth.uid() = 'e30bbcd6-3f78-47d1-b335-addfeed3863a'::uuid
     )
 );
--- Policies for scraped_data
 CREATE POLICY "Allow admin to select scraped_data" ON scraped_data FOR
 SELECT USING (
         (
@@ -94,7 +62,6 @@ CREATE POLICY "Allow admin to delete scraped_data" ON scraped_data FOR DELETE US
         auth.uid() = 'e30bbcd6-3f78-47d1-b335-addfeed3863a'::uuid
     )
 );
--- Policies for logs
 CREATE POLICY "Allow admin to select logs" ON logs FOR
 SELECT USING (
         (
@@ -118,3 +85,14 @@ CREATE POLICY "Allow admin to delete logs" ON logs FOR DELETE USING (
         auth.uid() = 'e30bbcd6-3f78-47d1-b335-addfeed3863a'::uuid
     )
 );
+-- 3. Add updated_at column to collectors (won't error if it already exists)
+ALTER TABLE collectors
+ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+-- 4. Auto-update trigger for updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $$ BEGIN NEW.updated_at = now();
+RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS set_collectors_updated_at ON collectors;
+CREATE TRIGGER set_collectors_updated_at BEFORE
+UPDATE ON collectors FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

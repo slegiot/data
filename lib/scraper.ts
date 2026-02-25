@@ -15,7 +15,6 @@ export interface Collector {
     css_selector: string
     is_active: boolean
     created_at?: string
-    updated_at?: string
 }
 
 export async function runCollector(collector: Collector) {

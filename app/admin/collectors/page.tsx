@@ -87,13 +87,14 @@ export default async function CollectorsPage() {
                             </div>
 
                             <div className="space-y-2">
-                                <Label htmlFor="css_selector">CSS Selector</Label>
-                                <Input
+                                <Label htmlFor="css_selector">Extraction Script (JS)</Label>
+                                <textarea
                                     id="css_selector"
                                     name="css_selector"
-                                    placeholder=".titleline > a"
+                                    placeholder={`const rows = document.querySelectorAll("table tbody tr");\nconst results = [];\n// ... build results array\nreturn results;`}
                                     required
-                                    className="bg-neutral-950 border-neutral-800"
+                                    rows={5}
+                                    className="w-full bg-neutral-950 border border-neutral-800 rounded-md px-3 py-2 text-sm font-mono text-white placeholder-neutral-500 focus:ring-orange-500 focus:border-orange-500"
                                 />
                             </div>
 
@@ -124,7 +125,7 @@ export default async function CollectorsPage() {
                         <TableRow className="border-neutral-800 hover:bg-neutral-800/50">
                             <TableHead className="text-neutral-400">Name</TableHead>
                             <TableHead className="text-neutral-400">Target</TableHead>
-                            <TableHead className="text-neutral-400">Selector</TableHead>
+                            <TableHead className="text-neutral-400">Script</TableHead>
                             <TableHead className="text-neutral-400">Status</TableHead>
                             <TableHead className="text-right text-neutral-400">Actions</TableHead>
                         </TableRow>
@@ -145,8 +146,10 @@ export default async function CollectorsPage() {
                                     <TableCell className="text-neutral-400 truncate max-w-[200px]" title={collector.target_url}>
                                         {collector.target_url}
                                     </TableCell>
-                                    <TableCell className="font-mono text-xs text-orange-400 bg-orange-400/10 px-2 py-1 rounded inline-block mt-2">
-                                        {collector.css_selector}
+                                    <TableCell className="max-w-[200px]">
+                                        <span className="font-mono text-xs text-orange-400 bg-orange-400/10 px-2 py-1 rounded truncate block" title={collector.css_selector}>
+                                            {collector.css_selector.substring(0, 40)}{collector.css_selector.length > 40 ? '...' : ''}
+                                        </span>
                                     </TableCell>
                                     <TableCell>
                                         {collector.is_active ? (

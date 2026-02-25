@@ -43,11 +43,11 @@ export function ExportButton({ data }: ExportButtonProps) {
                 }
 
                 // Create a separate CSV row for EVERY extracted item in the array
-                results.forEach((item: string) => {
+                results.forEach((item: unknown) => {
                     flatData.push({
                         'Collector': collectorName,
                         'Timestamp': timestamp,
-                        'Extracted Value': item,
+                        'Extracted Value': typeof item === 'string' ? item : JSON.stringify(item),
                     })
                 })
             })
@@ -66,6 +66,7 @@ export function ExportButton({ data }: ExportButtonProps) {
             document.body.appendChild(link)
             link.click()
             document.body.removeChild(link)
+            URL.revokeObjectURL(url)
 
             toast({
                 title: 'Export Successful',

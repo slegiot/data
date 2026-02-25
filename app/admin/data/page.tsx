@@ -64,7 +64,8 @@ export default async function DataViewerPage() {
                             scrapedData.map((row) => {
                                 const results = row.extracted_data?.results || []
                                 const count = Array.isArray(results) ? results.length : 0
-                                const preview = count > 0 ? results[0].substring(0, 50) + (results[0].length > 50 ? '...' : '') : 'Empty Payload'
+                                const rawPreview = count > 0 ? (typeof results[0] === 'string' ? results[0] : JSON.stringify(results[0])) : ''
+                                const preview = rawPreview ? rawPreview.substring(0, 80) + (rawPreview.length > 80 ? '...' : '') : 'Empty Payload'
 
                                 return (
                                     <TableRow key={row.id} className="border-neutral-800 hover:bg-neutral-800/50">

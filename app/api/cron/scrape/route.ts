@@ -7,48 +7,6 @@ export const dynamic = 'force-dynamic'
 // Maximum time Next.js will allow this route to run (5 minutes)
 export const maxDuration = 300
 
-/**
- * Background processor: runs all active collectors and logs results.
- * Executes asynchronously after the 202 response is sent.
- */
-async function processCollectors() {
-    const supabase = createAdminClient()
-
-    const { data: collectors, error } = await supabase
-        .from('collectors')
-        .select('*')
-        .eq('is_active', true)
-
-    if (error) {
-        console.error('[cron] Failed to fetch collectors:', error)
-        return
-    }
-
-    if (!collectors || collectors.length === 0) {
-        console.log('[cron] No active collectors found')
-        return
-    }
-
-    console.log(`[cron] Starting ${collectors.length} collectors...`)
-
-    // Run collectors sequentially to avoid overwhelming browserless
-    for (const collector of collectors) {
-        try {
-            console.log(`[cron] Running: ${collector.name}`)
-            const result = await runCollector(collector)
-            if (result.success) {
-                console.log(`[cron] ✓ ${collector.name} — ${result.count} items`)
-            } else {
-                console.error(`[cron] ✗ ${collector.name} — ${result.error}`)
-            }
-        } catch (err) {
-            console.error(`[cron] ✗ ${collector.name} — exception:`, err)
-        }
-    }
-
-    console.log('[cron] All collectors finished')
-}
-
 export async function GET(request: Request) {
     // 1. Verify Authorization Header
     const authHeader = request.headers.get('authorization')
@@ -69,18 +27,60 @@ export async function GET(request: Request) {
         )
     }
 
-    // 2. Fire-and-forget: start processing in the background
-    processCollectors().catch((err) =>
-        console.error('[cron] Background processing error:', err)
-    )
+    // 2. Fetch all active collectors
+    const supabase = createAdminClient()
 
-    // 3. Respond immediately so the cron job doesn't timeout
-    return NextResponse.json(
-        {
-            message: 'Scrape job accepted — processing in background',
-            accepted_at: new Date().toISOString(),
-        },
-        { status: 202 }
-    )
+    const { data: collectors, error } = await supabase
+        .from('collectors')
+        .select('*')
+        .eq('is_active', true)
+
+    if (error) {
+        console.error('[cron] Failed to fetch collectors:', error)
+        return NextResponse.json(
+            { error: 'Failed to fetch collectors', details: error.message },
+            { status: 500 }
+        )
+    }
+
+    if (!collectors || collectors.length === 0) {
+        console.log('[cron] No active collectors found')
+        return NextResponse.json({
+            message: 'No active collectors found',
+            completed_at: new Date().toISOString(),
+        })
+    }
+
+    console.log(`[cron] Starting ${collectors.length} collectors...`)
+
+    // 3. Run collectors sequentially (await each one — no fire-and-forget)
+    const results: { name: string; success: boolean; count?: number; error?: string }[] = []
+
+    for (const collector of collectors) {
+        try {
+            console.log(`[cron] Running: ${collector.name}`)
+            const result = await runCollector(collector)
+            if (result.success) {
+                console.log(`[cron] ✓ ${collector.name} — ${result.count} items`)
+                results.push({ name: collector.name, success: true, count: result.count })
+            } else {
+                console.error(`[cron] ✗ ${collector.name} — ${result.error}`)
+                results.push({ name: collector.name, success: false, error: result.error })
+            }
+        } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err)
+            console.error(`[cron] ✗ ${collector.name} — exception:`, err)
+            results.push({ name: collector.name, success: false, error: errMsg })
+        }
+    }
+
+    console.log('[cron] All collectors finished')
+
+    // 4. Return actual results
+    const successCount = results.filter(r => r.success).length
+    return NextResponse.json({
+        message: `Completed ${successCount}/${results.length} collectors successfully`,
+        completed_at: new Date().toISOString(),
+        results,
+    })
 }
-

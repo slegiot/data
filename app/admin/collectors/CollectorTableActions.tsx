@@ -49,6 +49,9 @@ export function CollectorTableActions({ collector }: CollectorActionsProps) {
     }
 
     const handleDelete = async () => {
+        if (!window.confirm(`Delete "${collector.name}"? This will also remove all associated data and logs.`)) {
+            return
+        }
         setIsDeleting(true)
         const result = await deleteCollector(collector.id)
         if (result.error) {

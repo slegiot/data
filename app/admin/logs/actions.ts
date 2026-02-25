@@ -1,37 +1,16 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
-
-// Helper to get authenticated client
-async function getSupabase() {
-    const cookieStore = cookies()
-    const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-            cookies: {
-                get(name: string) {
-                    return cookieStore.get(name)?.value
-                },
-            },
-        }
-    )
-
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user || user.id !== process.env.ADMIN_UUID) {
-        throw new Error('Unauthorized')
-    }
-
-    return supabase
-}
+import { getAuthenticatedAdminClient } from '@/lib/supabase/auth'
 
 export async function clearLogs() {
-    const supabase = await getSupabase()
+    const supabase = await getAuthenticatedAdminClient()
 
-    // Clear all logs using a dummy condition since we want to delete absolutely everything
-    const { error } = await supabase.from('logs').delete().neq('id', 'clear-all-forced')
+    // Delete all logs — use a condition that matches every UUID
+    const { error } = await supabase
+        .from('logs')
+        .delete()
+        .gte('created_at', '1970-01-01T00:00:00Z')
 
     if (error) {
         return { error: error.message }
