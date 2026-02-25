@@ -1,5 +1,6 @@
 import { createAdminClient } from './supabase/admin'
 import { chromium, Browser } from 'playwright-core'
+import * as Sentry from '@sentry/nextjs'
 import {
     applyStealthToContext,
     simulateHumanBehavior,
@@ -104,6 +105,12 @@ export async function runCollector(collector: Collector) {
     } catch (error: unknown) {
         const errMsg = error instanceof Error ? error.message : String(error)
         console.error(`Collector [${collector_id}] Error:`, error)
+
+        // Report to Sentry with collector context
+        Sentry.captureException(error, {
+            tags: { collector_id, collector_name: collector.name },
+            extra: { target_url, css_selector: css_selector.substring(0, 200) },
+        })
 
         await supabase.from('logs').insert([
             {
