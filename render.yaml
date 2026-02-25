@@ -42,6 +42,7 @@ services:
   # Accessible via WebSocket on Render's internal network.
   - type: pserv
     name: browserless-chrome
+    plan: pro
     runtime: image
     image:
       url: docker.io/browserless/chrome:latest
